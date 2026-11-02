@@ -300,7 +300,8 @@ const VIEWS = {
     const row = i => `<div class="row ${i.done ? 'done' : ''}" data-act="toggleShop" data-id="${i.id}">
       <div class="check ${i.done ? 'on' : ''}">✓</div><div class="main"><div class="t">${esc(i.title)}${i.qty ? ` <span class="muted">· ${esc(i.qty)}</span>` : ''}</div></div>
       <button class="x" data-act="edit" data-kind="shop" data-id="${i.id}" aria-label="Editar">✎</button></div>`;
-    let html = `<form class="quick" data-form="quickShop"><input name="title" id="quickShop" placeholder="Añadir producto…" autocomplete="off"><select name="cat" style="width:auto;max-width:42%">${Object.entries(SHOP_CATS).map(([k, v]) => `<option value="${k}" ${k === S.lastShopCat ? 'selected' : ''}>${v}</option>`).join('')}</select></form>`;
+    let html = `<form class="quick" data-form="quickShop" id="quickShopForm"><input name="title" id="quickShop" placeholder="Añadir producto…" autocomplete="off" enterkeyhint="send"><button class="btn" type="submit" aria-label="Añadir" style="padding:0 16px;font-size:22px">+</button></form>
+      <select name="cat" form="quickShopForm" id="quickShopCat" style="margin:-2px 0 10px">${Object.entries(SHOP_CATS).map(([k, v]) => `<option value="${k}" ${k === S.lastShopCat ? 'selected' : ''}>Sección: ${v}</option>`).join('')}</select>`;
     if (!open.length) html += list([], 'La lista está vacía');
     for (const [k, v] of Object.entries(SHOP_CATS)) {
       const g = open.filter(i => (i.cat || 'otros') === k);
@@ -529,10 +530,15 @@ document.addEventListener('click', e => {
 document.addEventListener('submit', async e => {
   if (e.target.dataset.form !== 'quickShop') return;
   e.preventDefault();
-  const fd = new FormData(e.target), title = String(fd.get('title') || '').trim();
-  if (!title) return;
-  S.lastShopCat = fd.get('cat'); S.refocus = '#quickShop';
-  await S.store.add({ mod: 'shop', title, qty: '', cat: S.lastShopCat, done: false });
+  const inp = $('#quickShop'), title = (inp?.value || '').trim();
+  if (!title) { inp?.focus(); return; }
+  S.lastShopCat = $('#quickShopCat')?.value || 'otros'; S.refocus = '#quickShop';
+  inp.value = '';
+  try { await S.store.add({ mod: 'shop', title, qty: '', cat: S.lastShopCat, done: false }); }
+  catch (err) { console.error(err); inp.value = title; toast('No se pudo añadir: ' + (err.code || err.message)); }
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.target.id === 'quickShop') { e.preventDefault(); e.target.form?.requestSubmit(); }
 });
 $('#nav').addEventListener('click', e => { const b = e.target.closest('button'); if (b) show(b.dataset.view); });
 $('#backBtn').addEventListener('click', () => show('mas'));
