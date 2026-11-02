@@ -162,6 +162,8 @@ function advance(s, r) {
   else if (r === 'yearly') d.setFullYear(d.getFullYear() + 1);
   return iso(d);
 }
+const debtOn = () => S.hh?.trackDebt !== false;
+const monthSpent = () => { const m = todayStr().slice(0, 7); return byMod('expense').filter(e => (e.date || '').startsWith(m) && e.cat !== 'liquidacion' && e.split !== 'pagador').reduce((s, e) => s + (+e.amount || 0), 0); };
 const isBill = t => t.area === 'finanzas' && +t.amount > 0;
 const MONTHLY_FACTOR = { daily: 30, weekly: 52 / 12, biweekly: 26 / 12, monthly: 1, quarterly: 1 / 3, yearly: 1 / 12, none: 0 };
 // Apunta el gasto de un pago fijo. El id depende de la fecha que tocaba, así nunca se duplica aunque lo registren los dos móviles a la vez.
@@ -299,7 +301,7 @@ const VIEWS = {
     html += `<div class="kpi" style="margin-bottom:10px">
       <div class="card" data-act="go" data-view="tareas" style="cursor:pointer"><b>${now.length}</b><small>para hoy</small></div>
       <div class="card" data-act="go" data-view="compra" style="cursor:pointer"><b>${shop}</b><small>en la compra</small></div>
-      <div class="card" data-act="go" data-view="dinero" style="cursor:pointer"><b style="font-size:17px;line-height:31px">${bal ? eur(Math.abs(bal.n)) : '—'}</b><small>${bal && bal.n ? `${esc(nameOf(bal.n > 0 ? bal.b : bal.a))} debe` : 'en paz'}</small></div></div>`;
+      <div class="card" data-act="go" data-view="dinero" style="cursor:pointer">${debtOn() ? `<b style="font-size:17px;line-height:31px">${bal ? eur(Math.abs(bal.n)) : '—'}</b><small>${bal && bal.n ? `${esc(nameOf(bal.n > 0 ? bal.b : bal.a))} debe` : 'en paz'}</small>` : `<b style="font-size:17px;line-height:31px">${eur(monthSpent())}</b><small>este mes</small>`}</div></div>`;
     html += `<h2>Hoy y atrasado</h2>${list(now.map(t => taskRow(t)), 'Todo al día 🎉')}`;
     if (docs.length) html += `<h2>Vencimientos cercanos</h2>${list(docs.map(docRow))}`;
     html += `<h2>Próximos 7 días</h2>${list(week.map(t => taskRow(t)), 'Nada programado esta semana')}`;
@@ -349,7 +351,8 @@ const VIEWS = {
     const total = month.reduce((s, e) => s + (+e.amount || 0), 0);
     const perCat = {}; month.forEach(e => perCat[e.cat] = (perCat[e.cat] || 0) + (+e.amount || 0));
     let html = '';
-    if (bal) html += `<div class="card center">${bal.n === 0 ? '<div class="big" style="font-size:20px;font-weight:700">Estáis en paz 🤝</div>' :
+    if (!debtOn()) { }
+    else if (bal) html += `<div class="card center">${bal.n === 0 ? '<div class="big" style="font-size:20px;font-weight:700">Estáis en paz 🤝</div>' :
       `<div class="muted">${esc(nameOf(bal.n > 0 ? bal.b : bal.a))} le debe a ${esc(nameOf(bal.n > 0 ? bal.a : bal.b))}</div><div style="font-size:28px;font-weight:700;margin:4px 0 10px">${eur(Math.abs(bal.n))}</div><button class="btn small" data-act="settle">Saldar cuentas</button>`}</div>`;
     else html += `<div class="banner">Cuando tu pareja se una al hogar, aquí veréis quién le debe a quién.</div>`;
     html += `<h2>Gasto común de este mes</h2><div class="card"><div style="font-size:24px;font-weight:700">${eur(total)}</div>
@@ -439,6 +442,7 @@ const VIEWS = {
       ${members().map(m => `<label>Nombre de ${m === S.me ? 'tu perfil' : 'tu pareja'}</label><input data-hh="names.${m}" value="${esc(nameOf(m))}">`).join('')}
       <div class="btns" style="margin-top:14px"><button class="btn small" data-act="saveSettings">Guardar</button></div></div>`;
     if (S.mode === 'firebase') html += `<h2>Invitar a tu pareja</h2><div class="card">${members().length > 1 ? '<p style="margin-top:0">Ya sois dos en este hogar ✓</p>' : '<p style="margin-top:0">Envíale este enlace. Al abrirlo e iniciar sesión con Google entrará en vuestro hogar.</p>'}<input readonly value="${esc(inv)}" id="invite"><div class="btns" style="margin-top:10px"><button class="btn small" data-act="share">Compartir enlace</button></div></div>`;
+    html += `<h2>Dinero</h2><div class="card"><label style="display:flex;gap:10px;align-items:flex-start;margin:0;color:var(--ink);font-size:15px;cursor:pointer"><input type="checkbox" id="trackDebt" ${debtOn() ? 'checked' : ''} style="width:20px;height:20px;margin-top:2px;flex:none"><span>Llevar cuentas entre nosotros<br><small class="muted">Si lo desactivas, la app sigue sumando los gastos, pero no muestra en ningún sitio quién debe a quién.</small></span></label></div>`;
     html += `<h2>Avisos</h2><div class="card"><p style="margin-top:0;font-size:14px">Al abrir la app cada día te muestra una notificación con lo pendiente para hoy y los vencimientos cercanos.</p><button class="btn ghost small" data-act="notif">${('Notification' in window && Notification.permission === 'granted') ? 'Avisos activados ✓' : 'Activar avisos'}</button></div>`;
     html += `<h2>Datos</h2><div class="btns"><button class="btn ghost small" data-act="export">Descargar copia (JSON)</button>
       ${S.mode === 'demo' ? '<button class="btn danger small" data-act="resetDemo">Restablecer datos de ejemplo</button><button class="btn danger small" data-act="emptyDemo">Empezar en blanco</button>' : '<button class="btn danger small" data-act="signOut">Cerrar sesión</button>'}</div>`;
@@ -452,11 +456,11 @@ const F = (k, l, t, o = {}) => ({ k, l, t, ...o });
 const FORMS = {
   task: { title: 'Tarea', fields: [F('title', '¿Qué hay que hacer?', 'text', { req: 1 }), F('area', 'Área', 'select', { o: AREAS, d: 'hogar' }), F('owner', 'Responsable (de principio a fin)', 'owner', { d: 'me' }), F('due', 'Fecha', 'date'), F('repeat', 'Se repite', 'select', { o: REPEATS, d: 'none' }), F('petId', 'Mascota', 'pet', { when: () => byMod('pet').length }), F('notes', 'Notas', 'textarea')] },
   shop: { title: 'Producto', fields: [F('title', 'Producto', 'text', { req: 1 }), F('qty', 'Cantidad', 'text'), F('cat', 'Sección', 'select', { o: SHOP_CATS, d: 'otros' })] },
-  expense: { title: 'Gasto', fields: [F('title', 'Concepto', 'text', { req: 1 }), F('amount', 'Importe (€)', 'number', { req: 1 }), F('paidBy', 'Pagado por', 'member', { d: 'me' }), F('split', '¿De quién es el gasto?', 'select', { o: SPLITS, d: 'mitad' }), F('cat', 'Categoría', 'select', { o: EXP_CATS, d: 'super' }), F('date', 'Fecha', 'date', { d: 'today' })] },
+  expense: { title: 'Gasto', fields: [F('title', 'Concepto', 'text', { req: 1 }), F('amount', 'Importe (€)', 'number', { req: 1 }), F('paidBy', 'Pagado por', 'member', { d: 'me' }), F('split', '¿De quién es el gasto?', 'select', { o: SPLITS, d: 'mitad', when: debtOn }), F('cat', 'Categoría', 'select', { o: EXP_CATS, d: 'super' }), F('date', 'Fecha', 'date', { d: 'today' })] },
   doc: { title: 'Documento / vencimiento', fields: [F('title', 'Nombre', 'text', { req: 1 }), F('cat', 'Tipo', 'select', { o: DOC_CATS, d: 'otros' }), F('expires', 'Fecha de caducidad / renovación', 'date'), F('remind', 'Avisar con cuántos días de antelación', 'number', { d: 30 }), F('owner', 'Responsable', 'owner', { d: 'me' }), F('notes', 'Notas (nº de póliza, dónde está guardado…)', 'textarea')] },
   pet: { title: 'Mascota', fields: [F('title', 'Nombre', 'text', { req: 1 }), F('species', 'Especie', 'select', { o: SPECIES, d: 'perro' }), F('birth', 'Fecha de nacimiento', 'date'), F('chip', 'Nº de chip', 'text'), F('vet', 'Veterinario', 'text'), F('notes', 'Notas (alergias, comida…)', 'textarea')] },
   kid: { title: 'Hijo/a', fields: [F('title', 'Nombre', 'text', { req: 1 }), F('birth', 'Fecha de nacimiento', 'date'), F('notes', 'Notas (pediatra, alergias, talla…)', 'textarea')] },
-  bill: { title: 'Gasto fijo', fields: [F('title', 'Concepto (alquiler, luz, Netflix…)', 'text', { req: 1 }), F('amount', 'Importe (€)', 'number', { req: 1 }), F('repeat', 'Cada cuánto', 'select', { o: REPEATS, d: 'monthly' }), F('due', 'Próximo pago', 'date', { d: 'today', req: 1 }), F('auto', 'Al llegar la fecha…', 'select', { o: { si: 'Apuntarlo solo en Dinero', no: 'Avisarme y lo marco yo al pagarlo' }, d: 'si' }), F('paidBy', 'Lo paga', 'member', { d: 'me' }), F('split', '¿De quién es el gasto?', 'select', { o: SPLITS, d: 'mitad' }), F('cat', 'Categoría', 'select', { o: EXP_CATS, d: 'casa' }), F('owner', 'Responsable de vigilarlo', 'owner', { d: 'me' })] },
+  bill: { title: 'Gasto fijo', fields: [F('title', 'Concepto (alquiler, luz, Netflix…)', 'text', { req: 1 }), F('amount', 'Importe (€)', 'number', { req: 1 }), F('repeat', 'Cada cuánto', 'select', { o: REPEATS, d: 'monthly' }), F('due', 'Próximo pago', 'date', { d: 'today', req: 1 }), F('auto', 'Al llegar la fecha…', 'select', { o: { si: 'Apuntarlo solo en Dinero', no: 'Avisarme y lo marco yo al pagarlo' }, d: 'si' }), F('paidBy', 'Lo paga', 'member', { d: 'me' }), F('split', '¿De quién es el gasto?', 'select', { o: SPLITS, d: 'mitad', when: debtOn }), F('cat', 'Categoría', 'select', { o: EXP_CATS, d: 'casa' }), F('owner', 'Responsable de vigilarlo', 'owner', { d: 'me' })] },
   baby: { title: 'Preparativo', fields: [F('title', '¿Qué?', 'text', { req: 1 }), F('group', 'Grupo', 'select', { o: Object.fromEntries(Object.keys(BABY_SEED).map(k => [k, k])), d: 'Embarazo' }), F('owner', 'Responsable', 'owner', { d: 'me' })] }
 };
 const MOD = { bill: 'task', task: 'task', shop: 'shop', expense: 'expense', doc: 'doc', pet: 'pet', kid: 'kid', baby: 'baby' };
@@ -575,6 +579,9 @@ document.addEventListener('submit', async e => {
 });
 document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.target.id === 'quickShop') { e.preventDefault(); e.target.form?.requestSubmit(); }
+});
+document.addEventListener('change', async e => {
+  if (e.target.id === 'trackDebt') { await S.store.updateHousehold({ trackDebt: e.target.checked }); toast(e.target.checked ? 'Cuentas entre vosotros activadas' : 'Ya no se muestra quién debe a quién'); }
 });
 $('#nav').addEventListener('click', e => { const b = e.target.closest('button'); if (b) show(b.dataset.view); });
 $('#backBtn').addEventListener('click', () => show('mas'));
