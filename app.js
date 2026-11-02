@@ -163,6 +163,39 @@ function advance(s, r) {
   return iso(d);
 }
 const debtOn = () => S.hh?.trackDebt !== false;
+// ---------- Presupuestos ----------
+const BUDGET_CATS = () => Object.keys(EXP_CATS).filter(c => c !== 'liquidacion');
+function budgetStatus() {
+  const budgets = S.hh?.budgets || {};
+  const d = new Date(), m = todayStr().slice(0, 7);
+  const dim = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate(), frac = d.getDate() / dim;
+  const endMonth = iso(new Date(d.getFullYear(), d.getMonth() + 1, 0));
+  const exps = byMod('expense').filter(e => (e.date || '').startsWith(m) && e.cat !== 'liquidacion' && e.split !== 'pagador');
+  const bills = byMod('task').filter(t => isBill(t) && !t.done && t.split !== 'pagador' && t.due && t.due <= endMonth);
+  return Object.entries(budgets).filter(([, v]) => +v > 0).map(([c, v]) => {
+    const budget = +v;
+    const fixed = exps.filter(e => e.cat === c && e.recurring).reduce((a, e) => a + (+e.amount || 0), 0);
+    const variable = exps.filter(e => e.cat === c && !e.recurring).reduce((a, e) => a + (+e.amount || 0), 0);
+    const pendingFixed = bills.filter(t => (t.cat || 'casa') === c).reduce((a, t) => a + (+t.amount), 0);
+    const spent = fixed + variable;
+    // Previsión: los fijos cuentan tal cual; lo variable se proyecta al ritmo que lleváis
+    const forecast = fixed + pendingFixed + (frac > 0 ? variable / frac : variable);
+    const state = spent > budget ? 'over' : forecast > budget * 1.05 && d.getDate() >= 5 ? 'pace' : spent >= budget * 0.9 ? 'near' : 'ok';
+    return { c, budget, spent, forecast, state };
+  }).sort((a, b) => ({ over: 0, pace: 1, near: 2, ok: 3 }[a.state] - { over: 0, pace: 1, near: 2, ok: 3 }[b.state]));
+}
+const BUDGET_COL = { over: 'var(--danger)', pace: 'var(--warn)', near: 'var(--warn)', ok: 'var(--accent)' };
+function budgetMsg(b) {
+  if (b.state === 'over') return `Os habéis pasado <b>${eur(b.spent - b.budget)}</b>`;
+  if (b.state === 'pace') return `A este ritmo acabaréis en unos <b>${eur(b.forecast)}</b>`;
+  return `Quedan <b>${eur(b.budget - b.spent)}</b>`;
+}
+function budgetRow(b) {
+  const pct = Math.min(100, b.spent / b.budget * 100);
+  return `<div style="margin:12px 0 4px"><div style="display:flex;justify-content:space-between;font-size:14px"><span>${EXP_CATS[b.c] || b.c}</span><span class="money">${eur(b.spent)} <span class="muted" style="font-weight:400">/ ${eur(b.budget)}</span></span></div>
+    <div class="bar" style="height:8px;margin:6px 0 3px"><div style="width:${pct}%;background:${BUDGET_COL[b.state]}"></div></div>
+    <div style="font-size:12.5px;color:${b.state === 'ok' ? 'var(--muted)' : BUDGET_COL[b.state]}">${budgetMsg(b)}</div></div>`;
+}
 const monthSpent = () => { const m = todayStr().slice(0, 7); return byMod('expense').filter(e => (e.date || '').startsWith(m) && e.cat !== 'liquidacion' && e.split !== 'pagador').reduce((s, e) => s + (+e.amount || 0), 0); };
 const isBill = t => t.area === 'finanzas' && +t.amount > 0;
 const MONTHLY_FACTOR = { daily: 30, weekly: 52 / 12, biweekly: 26 / 12, monthly: 1, quarterly: 1 / 3, yearly: 1 / 12, none: 0 };
@@ -302,6 +335,8 @@ const VIEWS = {
       <div class="card" data-act="go" data-view="tareas" style="cursor:pointer"><b>${now.length}</b><small>para hoy</small></div>
       <div class="card" data-act="go" data-view="compra" style="cursor:pointer"><b>${shop}</b><small>en la compra</small></div>
       <div class="card" data-act="go" data-view="dinero" style="cursor:pointer">${debtOn() ? `<b style="font-size:17px;line-height:31px">${bal ? eur(Math.abs(bal.n)) : '—'}</b><small>${bal && bal.n ? `${esc(nameOf(bal.n > 0 ? bal.b : bal.a))} debe` : 'en paz'}</small>` : `<b style="font-size:17px;line-height:31px">${eur(monthSpent())}</b><small>este mes</small>`}</div></div>`;
+    const alerts = budgetStatus().filter(b => b.state === 'over' || b.state === 'pace');
+    if (alerts.length) html += `<div class="card" data-act="go" data-view="dinero" style="cursor:pointer;border-left:4px solid var(--warn)"><b>💶 Presupuesto</b>${alerts.slice(0, 3).map(b => `<div style="font-size:14px;margin-top:4px">${EXP_CATS[b.c]}: <span style="color:${BUDGET_COL[b.state]}">${budgetMsg(b)}</span></div>`).join('')}</div>`;
     html += `<h2>Hoy y atrasado</h2>${list(now.map(t => taskRow(t)), 'Todo al día 🎉')}`;
     if (docs.length) html += `<h2>Vencimientos cercanos</h2>${list(docs.map(docRow))}`;
     html += `<h2>Próximos 7 días</h2>${list(week.map(t => taskRow(t)), 'Nada programado esta semana')}`;
@@ -357,6 +392,17 @@ const VIEWS = {
     else html += `<div class="banner">Cuando tu pareja se una al hogar, aquí veréis quién le debe a quién.</div>`;
     html += `<h2>Gasto común de este mes</h2><div class="card"><div style="font-size:24px;font-weight:700">${eur(total)}</div>
       ${Object.entries(perCat).sort((a, b) => b[1] - a[1]).map(([c, v]) => `<div style="display:flex;justify-content:space-between;font-size:14px;margin-top:6px"><span>${EXP_CATS[c] || c}</span><span class="money">${eur(v)}</span></div>`).join('')}</div>`;
+    const bs = budgetStatus();
+    if (!bs.length) html += `<h2>Presupuesto del mes</h2><div class="card"><p style="margin-top:0;font-size:14px">Pon un límite al mes por categoría (súper, ocio…) y la app os avisará si os estáis pasando o vais camino de hacerlo.</p><button class="btn small" data-act="editBudgets">Definir presupuestos</button></div>`;
+    else {
+      const tb = bs.reduce((a, b) => a + b.budget, 0), ts = bs.reduce((a, b) => a + b.spent, 0);
+      const now = new Date(), dim = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+      html += `<h2>Presupuesto del mes</h2><div class="card"><div style="display:flex;justify-content:space-between;align-items:baseline"><b>Total</b><span class="money">${eur(ts)} <span class="muted" style="font-weight:400">/ ${eur(tb)}</span></span></div>
+        <div class="bar" style="height:10px"><div style="width:${Math.min(100, ts / tb * 100)}%;background:${ts > tb ? 'var(--danger)' : 'var(--ink)'}"></div></div>
+        <div class="muted" style="font-size:12.5px">Día ${now.getDate()} de ${dim} · ${Math.round(now.getDate() / dim * 100)}% del mes</div>
+        ${bs.map(budgetRow).join('')}
+        <button class="btn ghost small" style="margin-top:12px" data-act="editBudgets">Editar presupuestos</button></div>`;
+    }
     const rec = byMod('task').filter(t => t.area === 'finanzas' && !t.done).sort(sortDue);
     const fixedMonthly = rec.filter(isBill).filter(t => t.split !== 'pagador').reduce((s, t) => s + (+t.amount) * (MONTHLY_FACTOR[t.repeat] ?? 0), 0);
     const endMonth = (() => { const d = new Date(); return iso(new Date(d.getFullYear(), d.getMonth() + 1, 0)); })();
@@ -523,6 +569,21 @@ const ACTIONS = {
     if (!await ask(`¿Registrar que ${nameOf(debtor)} ha pagado ${eur(Math.abs(b.n))}?`, 'Registrar')) return;
     await S.store.add({ mod: 'expense', title: 'Liquidación', amount: Math.abs(b.n), paidBy: debtor, split: 'otro', cat: 'liquidacion', date: todayStr() });
     toast('Cuentas saldadas 🤝');
+  },
+  editBudgets: () => {
+    const b = S.hh.budgets || {};
+    const form = $('#sheetForm');
+    form.innerHTML = `<h3>Presupuesto mensual</h3><p class="muted" style="font-size:13px;margin:4px 0 0">Deja en blanco las categorías sin límite. Cuentan los gastos comunes del mes, fijos incluidos.</p>
+      ${BUDGET_CATS().map(c => `<label>${EXP_CATS[c]}</label><input type="number" step="1" min="0" inputmode="decimal" data-budget="${c}" value="${b[c] || ''}" placeholder="Sin límite">`).join('')}
+      <div class="sheet-actions"><button class="btn ghost" value="cancel" formnovalidate>Cancelar</button><button class="btn" value="save">Guardar</button></div>`;
+    form.onsubmit = async e => {
+      e.preventDefault(); $('#sheet').close();
+      if (e.submitter?.value !== 'save') return;
+      const budgets = {};
+      form.querySelectorAll('[data-budget]').forEach(i => { const v = parseFloat(String(i.value).replace(',', '.')); if (v > 0) budgets[i.dataset.budget] = v; });
+      await S.store.updateHousehold({ budgets }); toast('Presupuestos guardados ✓');
+    };
+    $('#sheet').showModal();
   },
   setDue: () => {
     const form = $('#sheetForm');
