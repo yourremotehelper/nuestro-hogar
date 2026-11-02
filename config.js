@@ -1,15 +1,11 @@
-// Pega aquí la configuración de tu proyecto de Firebase
-// (Consola de Firebase > Configuración del proyecto > Tus apps > App web > SDK > Config).
-// Mientras esté en null, la app funciona en MODO DEMO: los datos se guardan solo en este navegador.
-window.FIREBASE_CONFIG = null;
-
-/* Ejemplo:
+// Configuración del proyecto de Firebase "nuestro-hogar-9f293".
+// La apiKey de Firebase no es secreta: los datos están protegidos por las reglas de Firestore.
+// Si pones esto a null, la app vuelve al MODO DEMO (datos solo en el navegador).
 window.FIREBASE_CONFIG = {
-  apiKey: "AIza...",
-  authDomain: "nuestro-hogar.firebaseapp.com",
-  projectId: "nuestro-hogar",
-  storageBucket: "nuestro-hogar.appspot.com",
-  messagingSenderId: "1234567890",
-  appId: "1:1234567890:web:abc123"
+  apiKey: "AIzaSyDvGCd5mcm10tk5Ea8Z3GXfaNNYI7oX1jc",
+  authDomain: "nuestro-hogar-9f293.firebaseapp.com",
+  projectId: "nuestro-hogar-9f293",
+  storageBucket: "nuestro-hogar-9f293.firebasestorage.app",
+  messagingSenderId: "675089136355",
+  appId: "1:675089136355:web:b54f216b4f538e3f3b23d6"
 };
-*/
