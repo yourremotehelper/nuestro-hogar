@@ -490,9 +490,9 @@ const VIEWS = {
     if (S.mode === 'firebase') html += `<h2>Invitar a tu pareja</h2><div class="card">${members().length > 1 ? '<p style="margin-top:0">Ya sois dos en este hogar ✓</p>' : '<p style="margin-top:0">Envíale este enlace. Al abrirlo e iniciar sesión con Google entrará en vuestro hogar.</p>'}<input readonly value="${esc(inv)}" id="invite"><div class="btns" style="margin-top:10px"><button class="btn small" data-act="share">Compartir enlace</button></div></div>`;
     html += `<h2>Dinero</h2><div class="card"><label style="display:flex;gap:10px;align-items:flex-start;margin:0;color:var(--ink);font-size:15px;cursor:pointer"><input type="checkbox" id="trackDebt" ${debtOn() ? 'checked' : ''} style="width:20px;height:20px;margin-top:2px;flex:none"><span>Llevar cuentas entre nosotros<br><small class="muted">Si lo desactivas, la app sigue sumando los gastos, pero no muestra en ningún sitio quién debe a quién.</small></span></label></div>`;
     html += `<h2>Avisos</h2><div class="card"><p style="margin-top:0;font-size:14px">Al abrir la app cada día te muestra una notificación con lo pendiente para hoy y los vencimientos cercanos.</p><button class="btn ghost small" data-act="notif">${('Notification' in window && Notification.permission === 'granted') ? 'Avisos activados ✓' : 'Activar avisos'}</button></div>`;
-    html += `<h2>Datos</h2><div class="btns"><button class="btn ghost small" data-act="export">Descargar copia (JSON)</button>
+    html += `<h2>Datos</h2><div class="btns"><button class="btn ghost small" data-act="export">Descargar copia (JSON)</button><button class="btn ghost small" data-act="importFile">Importar archivo</button><input type="file" id="importInput" accept=".json,application/json" hidden>
       ${S.mode === 'demo' ? '<button class="btn danger small" data-act="resetDemo">Restablecer datos de ejemplo</button><button class="btn danger small" data-act="emptyDemo">Empezar en blanco</button>' : '<button class="btn danger small" data-act="signOut">Cerrar sesión</button>'}</div>`;
-    html += `<p class="muted center" style="font-size:12px;margin-top:20px">Versión 6 · ${new Date().getFullYear()}</p>`;
+    html += `<p class="muted center" style="font-size:12px;margin-top:20px">Versión 7 · ${new Date().getFullYear()}</p>`;
     if (S.mode === 'demo') html += `<p class="muted" style="font-size:13px;margin-top:16px">Estás en modo demo. Para usarla con tu pareja, sigue el archivo LEEME.md (configurar Firebase y publicar en GitHub Pages).</p>`;
     return html;
   }
@@ -571,6 +571,7 @@ const ACTIONS = {
     await S.store.add({ mod: 'expense', title: 'Liquidación', amount: Math.abs(b.n), paidBy: debtor, split: 'otro', cat: 'liquidacion', date: todayStr() });
     toast('Cuentas saldadas 🤝');
   },
+  importFile: () => $('#importInput').click(),
   editBudgets: () => {
     const b = S.hh.budgets || {};
     const form = $('#sheetForm');
@@ -642,7 +643,25 @@ document.addEventListener('submit', async e => {
 document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.target.id === 'quickShop') { e.preventDefault(); e.target.form?.requestSubmit(); }
 });
+async function importData(file) {
+  let data;
+  try { data = JSON.parse(await file.text()); } catch { return toast('El archivo no es válido'); }
+  if (data?.type !== 'nuestro-hogar-import' || !Array.isArray(data.items)) return toast('Este archivo no es de Nuestro Hogar');
+  const nuevos = data.items.filter(it => it.id && !find('imp_' + it.id));
+  if (!nuevos.length && !data.dueDate) return toast('Ya estaba todo importado');
+  if (!await ask(`${data.title || 'Importar'}: se añadirán ${nuevos.length} elementos${data.dueDate ? ' y la fecha prevista de parto' : ''}. ¿Continuar?`, 'Importar')) return;
+  const own = o => o === 'me' ? S.me : o === 'partner' ? (partner() || S.me) : o === 'ambos' ? 'ambos' : S.me;
+  for (const { id, ...it } of nuevos) {
+    const item = { ...it };
+    if ('owner' in item) item.owner = own(item.owner);
+    if ('paidBy' in item) item.paidBy = own(item.paidBy);
+    await S.store.set('imp_' + id, item);
+  }
+  if (data.dueDate) await S.store.updateHousehold({ dueDate: data.dueDate });
+  toast(`Importado ✓ (${nuevos.length})`);
+}
 document.addEventListener('change', async e => {
+  if (e.target.id === 'importInput' && e.target.files[0]) { await importData(e.target.files[0]); e.target.value = ''; return; }
   if (e.target.id === 'trackDebt') { await S.store.updateHousehold({ trackDebt: e.target.checked }); toast(e.target.checked ? 'Cuentas entre vosotros activadas' : 'Ya no se muestra quién debe a quién'); }
 });
 $('#nav').addEventListener('click', e => { const b = e.target.closest('button'); if (b) show(b.dataset.view); });
