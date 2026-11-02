@@ -66,6 +66,7 @@ const LocalStore = {
   async add(it) { this.d.items.push({ ...it, id: rid(), createdAt: Date.now() }); this.emit(); },
   async update(id, p) { const i = this.d.items.find(x => x.id === id); if (i) Object.assign(i, p); this.emit(); },
   async remove(id) { this.d.items = this.d.items.filter(x => x.id !== id); this.emit(); },
+  async set(id, it) { if (this.d.items.some(x => x.id === id)) return; this.d.items.push({ ...it, id, createdAt: Date.now() }); this.emit(); },
   async updateHousehold(p) { for (const [k, v] of Object.entries(p)) { if (k.startsWith('names.')) this.d.hh.names[k.slice(6)] = v; else this.d.hh[k] = v; } this.emit(); },
   reset() { this.d = demoSeed(); this.emit(); }
 };
@@ -79,7 +80,8 @@ function demoSeed() {
     items: [
       T('Poner lavadora de toallas', 'hogar', 'u2', t, 'weekly'),
       T('Limpiar baños', 'hogar', 'u1', addDays(t, 2), 'weekly'),
-      T('Pagar comunidad', 'finanzas', 'u2', addDays(t, 5), 'monthly'),
+      T('Comunidad', 'finanzas', 'u2', addDays(t, 5), 'monthly', { amount: 60, paidBy: 'u2', split: 'mitad', cat: 'casa', auto: 'si' }),
+      T('Alquiler', 'finanzas', 'u1', addDays(t, 3), 'monthly', { amount: 750, paidBy: 'u1', split: 'mitad', cat: 'casa', auto: 'si' }),
       T('Cita revisión ginecólogo', 'bebe', 'ambos', addDays(t, 9)),
       T('Montar la cuna', 'bebe', 'u2', addDays(t, 30)),
       T('Pedir cita veterinario', 'mascotas', 'u1', addDays(t, -1), 'none', { petId }),
@@ -144,6 +146,7 @@ async function makeFirebaseStore() {
     add: it => F.addDoc(col(), clean({ ...it, createdAt: Date.now() })),
     update: (id, p) => F.updateDoc(F.doc(col(), id), clean(p)),
     remove: id => F.deleteDoc(F.doc(col(), id)),
+    set: (id, it) => F.setDoc(F.doc(col(), id), clean({ ...it, createdAt: Date.now() }), { merge: true }),
     updateHousehold: p => F.updateDoc(F.doc(db, 'households', hid), clean(p))
   };
 }
@@ -159,7 +162,34 @@ function advance(s, r) {
   else if (r === 'yearly') d.setFullYear(d.getFullYear() + 1);
   return iso(d);
 }
+const isBill = t => t.area === 'finanzas' && +t.amount > 0;
+const MONTHLY_FACTOR = { daily: 30, weekly: 52 / 12, biweekly: 26 / 12, monthly: 1, quarterly: 1 / 3, yearly: 1 / 12, none: 0 };
+// Apunta el gasto de un pago fijo. El id depende de la fecha que tocaba, así nunca se duplica aunque lo registren los dos móviles a la vez.
+function billExpense(t, due, date) {
+  const paidBy = members().includes(t.paidBy) ? t.paidBy : (members().includes(t.owner) ? t.owner : S.me);
+  return S.store.set(`rec_${t.id}_${due}`, { mod: 'expense', title: t.title, amount: +t.amount, paidBy, split: t.split || 'mitad', cat: t.cat || 'casa', date, recurring: t.id });
+}
+const processing = new Set();
+async function processBills() {
+  for (const t of byMod('task')) {
+    if (!isBill(t) || t.done || t.auto !== 'si' || !t.due || daysUntil(t.due) > 0) continue;
+    const key = t.id + t.due; if (processing.has(key)) continue; processing.add(key);
+    let due = t.due, guard = 0;
+    while (due && daysUntil(due) <= 0 && guard++ < 60) {
+      await billExpense(t, due, due);
+      if (!t.repeat || t.repeat === 'none') { await S.store.update(t.id, { done: true, doneAt: Date.now() }); due = null; break; }
+      due = advance(due, t.repeat);
+    }
+    if (due) await S.store.update(t.id, { due });
+  }
+}
 async function toggleTask(t) {
+  if (!t.done && isBill(t)) {
+    await billExpense(t, t.due || todayStr(), todayStr());
+    toast(`Pagado ✓ · ${eur(t.amount)} apuntados en Dinero`);
+    if (t.repeat && t.repeat !== 'none') { let next = advance(t.due || todayStr(), t.repeat); while (daysUntil(next) <= 0) next = advance(next, t.repeat); return S.store.update(t.id, { due: next }); }
+    return S.store.update(t.id, { done: true, doneBy: S.me, doneAt: Date.now() });
+  }
   if (t.done) return S.store.update(t.id, { done: false });
   S.store.add({ mod: 'log', title: t.title, area: t.area, by: S.me, at: Date.now(), ref: t.id });
   if (t.repeat && t.repeat !== 'none') {
@@ -229,11 +259,11 @@ function dueBadge(due) {
 }
 function taskRow(t, showArea = true) {
   const pet = t.petId ? S.items.find(p => p.id === t.petId) : null;
-  return `<div class="row ${t.done ? 'done' : ''}" data-act="edit" data-kind="task" data-id="${t.id}">
+  return `<div class="row ${t.done ? 'done' : ''}" data-act="edit" data-kind="${t.area === 'finanzas' ? 'bill' : 'task'}" data-id="${t.id}">
     <div class="check ${t.done ? 'on' : ''}" data-act="toggleTask" data-id="${t.id}">✓</div>
     <div class="main"><div class="t">${esc(t.title)}</div>
-      <div class="s">${dueBadge(t.due)} ${ownerPill(t.owner)} ${showArea ? `<span>${AREAS[t.area] || ''}</span>` : ''} ${pet ? `<span>· ${esc(pet.title)}</span>` : ''} ${t.repeat && t.repeat !== 'none' ? `<span title="${REPEATS[t.repeat]}">🔁</span>` : ''}</div>
-    </div></div>`;
+      <div class="s">${dueBadge(t.due)} ${ownerPill(t.owner)} ${showArea ? `<span>${AREAS[t.area] || ''}</span>` : ''} ${pet ? `<span>· ${esc(pet.title)}</span>` : ''} ${t.repeat && t.repeat !== 'none' ? `<span title="${REPEATS[t.repeat]}">🔁</span>` : ''} ${isBill(t) && t.auto === 'si' ? '<span class="pill">automático</span>' : ''}</div>
+    </div>${isBill(t) ? `<span class="money">${eur(t.amount)}</span>` : ''}</div>`;
 }
 function docStatus(d) {
   if (!d.expires) return '<span class="muted">Sin fecha</span>';
@@ -325,8 +355,13 @@ const VIEWS = {
     html += `<h2>Gasto común de este mes</h2><div class="card"><div style="font-size:24px;font-weight:700">${eur(total)}</div>
       ${Object.entries(perCat).sort((a, b) => b[1] - a[1]).map(([c, v]) => `<div style="display:flex;justify-content:space-between;font-size:14px;margin-top:6px"><span>${EXP_CATS[c] || c}</span><span class="money">${eur(v)}</span></div>`).join('')}</div>`;
     const rec = byMod('task').filter(t => t.area === 'finanzas' && !t.done).sort(sortDue);
-    html += `<h2>Pagos y recibos recurrentes</h2>${list(rec.map(t => taskRow(t, false)), 'Añade aquí alquiler, comunidad, seguros, suscripciones…')}
-      <button class="btn ghost small" data-act="new" data-kind="task" data-preset='${esc(JSON.stringify({ area: 'finanzas', repeat: 'monthly' }))}'>+ Pago recurrente</button>`;
+    const fixedMonthly = rec.filter(isBill).filter(t => t.split !== 'pagador').reduce((s, t) => s + (+t.amount) * (MONTHLY_FACTOR[t.repeat] ?? 0), 0);
+    const endMonth = (() => { const d = new Date(); return iso(new Date(d.getFullYear(), d.getMonth() + 1, 0)); })();
+    const pending = rec.filter(isBill).filter(t => t.due && t.due <= endMonth && t.split !== 'pagador').reduce((s, t) => s + (+t.amount), 0);
+    if (pending) html += `<p class="muted" style="font-size:13px;margin:-4px 0 0">Quedan <b>${eur(pending)}</b> de gastos fijos por pasar este mes.</p>`;
+    html += `<h2>Gastos fijos</h2>${list(rec.map(t => taskRow(t, false)), 'Añade alquiler, comunidad, luz, seguros, suscripciones…')}
+      ${fixedMonthly ? `<p class="muted" style="font-size:13px;margin:0 0 8px">Gastos fijos comunes: <b>${eur(fixedMonthly)}</b> al mes de media.</p>` : ''}
+      <button class="btn ghost small" data-act="new" data-kind="bill">+ Gasto fijo</button>`;
     html += `<h2>Movimientos</h2>${list(exps.slice(0, 60).map(e => `<div class="row" data-act="edit" data-kind="expense" data-id="${e.id}"><div class="main"><div class="t">${esc(e.title)}</div><div class="s">${fmtDate(e.date)} · ${EXP_CATS[e.cat] || ''} ${ownerPill(e.paidBy)} ${e.split !== 'mitad' ? `<span class="muted">${e.split === 'pagador' ? 'personal' : 'para el otro'}</span>` : ''}</div></div><span class="money">${eur(e.amount)}</span></div>`), 'Aún no hay gastos')}`;
     return html + fab('expense');
   },
@@ -421,9 +456,10 @@ const FORMS = {
   doc: { title: 'Documento / vencimiento', fields: [F('title', 'Nombre', 'text', { req: 1 }), F('cat', 'Tipo', 'select', { o: DOC_CATS, d: 'otros' }), F('expires', 'Fecha de caducidad / renovación', 'date'), F('remind', 'Avisar con cuántos días de antelación', 'number', { d: 30 }), F('owner', 'Responsable', 'owner', { d: 'me' }), F('notes', 'Notas (nº de póliza, dónde está guardado…)', 'textarea')] },
   pet: { title: 'Mascota', fields: [F('title', 'Nombre', 'text', { req: 1 }), F('species', 'Especie', 'select', { o: SPECIES, d: 'perro' }), F('birth', 'Fecha de nacimiento', 'date'), F('chip', 'Nº de chip', 'text'), F('vet', 'Veterinario', 'text'), F('notes', 'Notas (alergias, comida…)', 'textarea')] },
   kid: { title: 'Hijo/a', fields: [F('title', 'Nombre', 'text', { req: 1 }), F('birth', 'Fecha de nacimiento', 'date'), F('notes', 'Notas (pediatra, alergias, talla…)', 'textarea')] },
+  bill: { title: 'Gasto fijo', fields: [F('title', 'Concepto (alquiler, luz, Netflix…)', 'text', { req: 1 }), F('amount', 'Importe (€)', 'number', { req: 1 }), F('repeat', 'Cada cuánto', 'select', { o: REPEATS, d: 'monthly' }), F('due', 'Próximo pago', 'date', { d: 'today', req: 1 }), F('auto', 'Al llegar la fecha…', 'select', { o: { si: 'Apuntarlo solo en Dinero', no: 'Avisarme y lo marco yo al pagarlo' }, d: 'si' }), F('paidBy', 'Lo paga', 'member', { d: 'me' }), F('split', '¿De quién es el gasto?', 'select', { o: SPLITS, d: 'mitad' }), F('cat', 'Categoría', 'select', { o: EXP_CATS, d: 'casa' }), F('owner', 'Responsable de vigilarlo', 'owner', { d: 'me' })] },
   baby: { title: 'Preparativo', fields: [F('title', '¿Qué?', 'text', { req: 1 }), F('group', 'Grupo', 'select', { o: Object.fromEntries(Object.keys(BABY_SEED).map(k => [k, k])), d: 'Embarazo' }), F('owner', 'Responsable', 'owner', { d: 'me' })] }
 };
-const MOD = { task: 'task', shop: 'shop', expense: 'expense', doc: 'doc', pet: 'pet', kid: 'kid', baby: 'baby' };
+const MOD = { bill: 'task', task: 'task', shop: 'shop', expense: 'expense', doc: 'doc', pet: 'pet', kid: 'kid', baby: 'baby' };
 
 function openForm(kind, item = null, preset = {}) {
   const spec = FORMS[kind];
@@ -457,7 +493,7 @@ function openForm(kind, item = null, preset = {}) {
     for (const f of spec.fields) if (f.t === 'number' && data[f.k] !== undefined) data[f.k] = data[f.k] === '' ? null : parseFloat(String(data[f.k]).replace(',', '.'));
     dlg.close();
     if (item) await S.store.update(item.id, data);
-    else await S.store.add({ mod: MOD[kind], ...preset, ...data, ...(kind === 'task' || kind === 'baby' || kind === 'shop' ? { done: false } : {}) });
+    else await S.store.add({ mod: MOD[kind], ...preset, ...data, ...(kind === 'bill' ? { area: 'finanzas' } : {}), ...(kind === 'task' || kind === 'bill' || kind === 'baby' || kind === 'shop' ? { done: false } : {}) });
     toast('Guardado ✓');
   };
   $('#sheet').showModal();
@@ -556,7 +592,7 @@ function render() {
   $('#view').innerHTML = VIEWS[S.view]();
   if (S.refocus) { $(S.refocus)?.focus(); S.refocus = null; }
 }
-function onData(hh, items) { S.hh = hh; S.items = items; render(); }
+function onData(hh, items) { S.hh = hh; S.items = items; render(); processBills().catch(e => console.error(e)); }
 
 function dailyNotify() {
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
