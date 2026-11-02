@@ -492,6 +492,7 @@ const VIEWS = {
     html += `<h2>Avisos</h2><div class="card"><p style="margin-top:0;font-size:14px">Al abrir la app cada día te muestra una notificación con lo pendiente para hoy y los vencimientos cercanos.</p><button class="btn ghost small" data-act="notif">${('Notification' in window && Notification.permission === 'granted') ? 'Avisos activados ✓' : 'Activar avisos'}</button></div>`;
     html += `<h2>Datos</h2><div class="btns"><button class="btn ghost small" data-act="export">Descargar copia (JSON)</button>
       ${S.mode === 'demo' ? '<button class="btn danger small" data-act="resetDemo">Restablecer datos de ejemplo</button><button class="btn danger small" data-act="emptyDemo">Empezar en blanco</button>' : '<button class="btn danger small" data-act="signOut">Cerrar sesión</button>'}</div>`;
+    html += `<p class="muted center" style="font-size:12px;margin-top:20px">Versión 6 · ${new Date().getFullYear()}</p>`;
     if (S.mode === 'demo') html += `<p class="muted" style="font-size:13px;margin-top:16px">Estás en modo demo. Para usarla con tu pareja, sigue el archivo LEEME.md (configurar Firebase y publicar en GitHub Pages).</p>`;
     return html;
   }
