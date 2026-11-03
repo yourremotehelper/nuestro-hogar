@@ -397,12 +397,15 @@ const VIEWS = {
     const hist = byMod('shophist').sort((a, b) => (b.count || 0) - (a.count || 0) || (b.last || 0) - (a.last || 0));
     html += `<datalist id="shopHist">${hist.map(h => `<option value="${esc(h.title)}">`).join('')}</datalist>`;
     const sugg = hist.filter(h => !inList.has(slug(h.title)));
-    if (sugg.length) {
-      const shown = S.showAllHist ? sugg : sugg.slice(0, 14);
-      html += section('compra-hab', '⭐ Habituales', `${sugg.length} ${sugg.length === 1 ? "producto" : "productos"}`, `<div style="display:flex;justify-content:space-between;align-items:baseline;margin:0 0 6px"><span class="muted" style="font-size:13px">${S.editHist ? 'Toca para quitar de habituales' : 'Toca para añadir a la lista'}</span><button class="chip" style="padding:3px 10px;font-size:12px" data-act="toggleEditHist">${S.editHist ? 'Listo' : 'Editar'}</button></div>
-        <div class="chips" style="flex-wrap:wrap;padding-bottom:4px">${shown.map(h => `<button class="chip" data-act="${S.editHist ? 'forgetHist' : 'addHist'}" data-id="${h.id}">${S.editHist ? '✕' : '+'} ${esc(h.title)}</button>`).join('')}
-        ${sugg.length > 14 ? `<button class="chip" style="border-style:dashed" data-act="toggleAllHist">${S.showAllHist ? 'Ver menos' : `Ver todos (${sugg.length})`}</button>` : ''}</div>`);
-    }
+    const shown = S.showAllHist ? hist : hist.slice(0, 16);
+    const chipH = h => { const has = inList.has(slug(h.title));
+      if (S.editHist) return `<button class="chip" data-act="forgetHist" data-id="${h.id}">✕ ${esc(h.title)}</button>`;
+      return has ? `<button class="chip" style="opacity:.45" disabled>✓ ${esc(h.title)}</button>` : `<button class="chip" data-act="addHist" data-id="${h.id}">+ ${esc(h.title)}</button>`; };
+    html += section('compra-hab', '⭐ Habituales', hist.length ? (sugg.length ? `${sugg.length} para añadir` : 'todos en la lista') : 'aún ninguno',
+      hist.length ? `<div style="display:flex;justify-content:space-between;align-items:baseline;margin:0 0 6px"><span class="muted" style="font-size:13px">${S.editHist ? 'Toca para quitar de habituales' : 'Toca para añadir · ✓ ya está en la lista'}</span><button class="chip" style="padding:3px 10px;font-size:12px" data-act="toggleEditHist">${S.editHist ? 'Listo' : 'Editar'}</button></div>
+        <div class="chips" style="flex-wrap:wrap;padding-bottom:4px">${shown.map(chipH).join('')}
+        ${hist.length > 16 ? `<button class="chip" style="border-style:dashed" data-act="toggleAllHist">${S.showAllHist ? 'Ver menos' : `Ver todos (${hist.length})`}</button>` : ''}</div>`
+      : `<p class="muted" style="font-size:13px;margin:0">Todo lo que añadáis a la lista se guarda aquí, y la próxima vez lo añadís con un toque.</p>`);
     if (!open.length) html += list([], hist.length ? 'La lista está vacía · toca tus habituales para añadirlos' : 'La lista está vacía');
     for (const [k, v] of Object.entries(SHOP_CATS)) {
       const g = open.filter(i => (i.cat || 'otros') === k);
@@ -536,7 +539,7 @@ const VIEWS = {
     html += `<h2>Avisos</h2><div class="card"><p style="margin-top:0;font-size:14px">Al abrir la app cada día te muestra una notificación con lo pendiente para hoy y los vencimientos cercanos.</p><button class="btn ghost small" data-act="notif">${('Notification' in window && Notification.permission === 'granted') ? 'Avisos activados ✓' : 'Activar avisos'}</button></div>`;
     html += `<h2>Datos</h2><div class="btns"><button class="btn ghost small" data-act="export">Descargar copia (JSON)</button><button class="btn ghost small" data-act="importFile">Importar archivo</button><input type="file" id="importInput" accept=".json,application/json" hidden>
       ${S.mode === 'demo' ? '<button class="btn danger small" data-act="resetDemo">Restablecer datos de ejemplo</button><button class="btn danger small" data-act="emptyDemo">Empezar en blanco</button>' : '<button class="btn danger small" data-act="signOut">Cerrar sesión</button>'}</div>`;
-    html += `<p class="muted center" style="font-size:12px;margin-top:20px">Versión 11 · ${new Date().getFullYear()}</p>`;
+    html += `<p class="muted center" style="font-size:12px;margin-top:20px">Versión 12 · ${new Date().getFullYear()}</p>`;
     if (S.mode === 'demo') html += `<p class="muted" style="font-size:13px;margin-top:16px">Estás en modo demo. Para usarla con tu pareja, sigue el archivo LEEME.md (configurar Firebase y publicar en GitHub Pages).</p>`;
     return html;
   }
