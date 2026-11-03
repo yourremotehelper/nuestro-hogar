@@ -86,3 +86,10 @@ dialog::backdrop{background:rgba(30,28,25,.45)}
 dialog.ask{border-radius:18px;margin:auto;max-width:340px;width:calc(100% - 40px)}
 dialog.ask form{padding:18px}
 dialog.ask p{margin:0;font-size:16px}
+.sec{margin-top:10px}
+.sec-h{width:100%;display:flex;align-items:center;gap:8px;border:0;background:none;padding:10px 2px;cursor:pointer;color:var(--muted);font:inherit;text-align:left;border-bottom:1px solid var(--line)}
+.sec-t{font-size:14px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
+.sec-s{flex:1;text-align:right;font-size:13px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chev{font-size:22px;line-height:1;transition:transform .2s;display:inline-block;width:14px;text-align:center}
+.chev.on{transform:rotate(90deg)}
+.sec-b{padding-top:10px}

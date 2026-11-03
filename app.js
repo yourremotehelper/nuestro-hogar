@@ -323,6 +323,17 @@ function docStatus(d) {
 function docRow(d) {
   return `<div class="row" data-act="edit" data-kind="doc" data-id="${d.id}"><div class="main"><div class="t">${esc(d.title)}</div><div class="s">${docStatus(d)} ${ownerPill(d.owner)}</div></div></div>`;
 }
+const isOpen = (k, def) => { S.open ??= ls.get('open', {}); return k in S.open ? S.open[k] : def; };
+// Apartado plegable: cabecera con resumen; el contenido solo se pinta si está abierto
+function section(k, title, summary, body, def = false) {
+  const o = isOpen(k, def);
+  return `<div class="sec"><button class="sec-h" data-act="toggleSec" data-k="${k}" data-def="${def ? 1 : 0}"><span class="sec-t">${title}</span><span class="sec-s">${summary ?? ''}</span><span class="chev ${o ? 'on' : ''}">›</span></button>${o ? `<div class="sec-b">${body}</div>` : ''}</div>`;
+}
+// Lista recortada con "Ver todos"
+function limited(k, rows, n, empty) {
+  const all = S.more?.[k];
+  return list(all ? rows : rows.slice(0, n), empty) + (rows.length > n ? `<button class="btn ghost small" style="margin:-2px 0 10px" data-act="toggleMore" data-k="${k}">${all ? 'Ver menos' : `Ver todos (${rows.length})`}</button>` : '');
+}
 const list = (rows, empty = 'Nada por aquí') => `<div class="list">${rows.length ? rows.join('') : `<div class="empty">${empty}</div>`}</div>`;
 const sortDue = (a, b) => (a.due || '9999').localeCompare(b.due || '9999');
 const fab = (kind, preset = {}) => `<button class="fab" data-act="new" data-kind="${kind}" data-preset='${esc(JSON.stringify(preset))}' aria-label="Añadir">+</button>`;
@@ -350,10 +361,10 @@ const VIEWS = {
       <div class="card" data-act="go" data-view="dinero" style="cursor:pointer">${debtOn() ? `<b style="font-size:17px;line-height:31px">${bal ? eur(Math.abs(bal.n)) : '—'}</b><small>${bal && bal.n ? `${esc(nameOf(bal.n > 0 ? bal.b : bal.a))} debe` : 'en paz'}</small>` : `<b style="font-size:17px;line-height:31px">${eur(monthSpent())}</b><small>este mes</small>`}</div></div>`;
     const alerts = budgetStatus().filter(b => b.state === 'over' || b.state === 'pace');
     if (alerts.length) html += `<div class="card" data-act="go" data-view="dinero" style="cursor:pointer;border-left:4px solid var(--warn)"><b>💶 Presupuesto</b>${alerts.slice(0, 3).map(b => `<div style="font-size:14px;margin-top:4px">${EXP_CATS[b.c]}: <span style="color:${BUDGET_COL[b.state]}">${budgetMsg(b)}</span></div>`).join('')}</div>`;
-    html += `<h2>Hoy y atrasado</h2>${list(now.map(t => taskRow(t)), 'Todo al día 🎉')}`;
-    if (docs.length) html += `<h2>Vencimientos cercanos</h2>${list(docs.map(docRow))}`;
-    html += `<h2>Próximos 7 días</h2>${list(week.map(t => taskRow(t)), 'Nada programado esta semana')}`;
-    html += `<h2>¿Quién lleva qué?</h2><div class="card" data-act="go" data-view="reparto" style="cursor:pointer"><div class="muted" style="font-size:13px">Responsabilidades activas</div>${stackBar(st.active)}</div>`;
+    html += `<h2>Hoy y atrasado</h2>${limited('hoy', now.map(t => taskRow(t)), 5, 'Todo al día 🎉')}`;
+    if (docs.length) html += section('ini-venc', 'Vencimientos', `${docs.length} cerca`, list(docs.map(docRow)), true);
+    html += section('ini-semana', 'Próximos 7 días', week.length ? `${week.length} ${week.length === 1 ? 'cosa' : 'cosas'}` : 'nada', limited('semana', week.map(t => taskRow(t)), 6, 'Nada programado esta semana'));
+    html += section('ini-reparto', '¿Quién lleva qué?', Object.entries(st.active).filter(([, v]) => v).map(([u, v]) => `${esc(nameOf(u))} ${v}`).join(' · '), `<div class="card" data-act="go" data-view="reparto" style="cursor:pointer"><div class="muted" style="font-size:13px">Responsabilidades activas</div>${stackBar(st.active)}</div>`);
     return html + fab('task');
   },
 
@@ -366,7 +377,7 @@ const VIEWS = {
     const chip = (k, v, label) => `<button class="chip ${f[k] === v ? 'on' : ''}" data-act="filter" data-k="${k}" data-v="${v}">${label}</button>`;
     let html = `<div class="chips">${chip('area', 'all', 'Todas')}${Object.entries(AREAS).map(([k, v]) => chip('area', k, v)).join('')}</div>
       <div class="chips">${chip('owner', 'all', 'Cualquiera')}${[...members(), 'ambos'].map(m => chip('owner', m, esc(nameOf(m)))).join('')}</div>`;
-    html += list(open.map(t => taskRow(t, f.area === 'all')), 'No hay tareas pendientes aquí');
+    html += limited('tareas', open.map(t => taskRow(t, f.area === 'all')), 12, 'No hay tareas pendientes aquí');
     if (done.length) {
       html += `<div class="btns" style="margin:10px 0"><button class="btn ghost small" data-act="toggleDone">${S.showDone ? 'Ocultar' : 'Ver'} hechas (${done.length})</button>${S.showDone ? `<button class="btn ghost small" data-act="clearDone">Borrar hechas</button>` : ''}</div>`;
       if (S.showDone) html += list(done.map(t => taskRow(t)));
@@ -388,16 +399,16 @@ const VIEWS = {
     const sugg = hist.filter(h => !inList.has(slug(h.title)));
     if (sugg.length) {
       const shown = S.showAllHist ? sugg : sugg.slice(0, 14);
-      html += `<div style="display:flex;justify-content:space-between;align-items:baseline;margin:4px 0 6px"><span class="muted" style="font-size:13px;font-weight:600">${S.editHist ? 'Toca para quitar de habituales' : 'Habituales · toca para añadir'}</span><button class="chip" style="padding:3px 10px;font-size:12px" data-act="toggleEditHist">${S.editHist ? 'Listo' : 'Editar'}</button></div>
+      html += section('compra-hab', '⭐ Habituales', `${sugg.length} ${sugg.length === 1 ? "producto" : "productos"}`, `<div style="display:flex;justify-content:space-between;align-items:baseline;margin:0 0 6px"><span class="muted" style="font-size:13px">${S.editHist ? 'Toca para quitar de habituales' : 'Toca para añadir a la lista'}</span><button class="chip" style="padding:3px 10px;font-size:12px" data-act="toggleEditHist">${S.editHist ? 'Listo' : 'Editar'}</button></div>
         <div class="chips" style="flex-wrap:wrap;padding-bottom:4px">${shown.map(h => `<button class="chip" data-act="${S.editHist ? 'forgetHist' : 'addHist'}" data-id="${h.id}">${S.editHist ? '✕' : '+'} ${esc(h.title)}</button>`).join('')}
-        ${sugg.length > 14 ? `<button class="chip" style="border-style:dashed" data-act="toggleAllHist">${S.showAllHist ? 'Ver menos' : `Ver todos (${sugg.length})`}</button>` : ''}</div>`;
+        ${sugg.length > 14 ? `<button class="chip" style="border-style:dashed" data-act="toggleAllHist">${S.showAllHist ? 'Ver menos' : `Ver todos (${sugg.length})`}</button>` : ''}</div>`);
     }
     if (!open.length) html += list([], hist.length ? 'La lista está vacía · toca tus habituales para añadirlos' : 'La lista está vacía');
     for (const [k, v] of Object.entries(SHOP_CATS)) {
       const g = open.filter(i => (i.cat || 'otros') === k);
-      if (g.length) html += `<h2>${v}</h2>${list(g.map(row))}`;
+      if (g.length) html += `<div class="muted" style="font-size:13px;font-weight:600;margin:12px 0 6px">${v}</div>${list(g.map(row))}`;
     }
-    if (done.length) html += `<h2>En el carro (${done.length})</h2>${list(done.map(row))}<button class="btn block" data-act="finishShop">🧾 Terminar compra</button><button class="btn ghost block" style="margin-top:8px" data-act="clearShop">Quitar del carro sin apuntar gasto</button>`;
+    if (done.length) html += section('compra-carro', '🛒 En el carro', `${done.length} ${done.length === 1 ? 'producto' : 'productos'}`, list(done.map(row)) + `<button class="btn ghost block" data-act="clearShop">Quitar del carro sin apuntar gasto</button>`) + `<button class="btn block" style="margin-top:8px" data-act="finishShop">🧾 Terminar compra</button>`;
     return html;
   },
 
@@ -423,27 +434,28 @@ const VIEWS = {
       ${line('🔁 Fijos', fixedSpent, fixedPending ? `+ ${eur(fixedPending)} por pasar este mes` : '')}
       ${line('🛒 Variables', varSpent, 'compras, ocio y demás gastos apuntados a mano')}
       ${fixedPending ? `<div style="border-top:1px solid var(--line);margin-top:12px;padding-top:10px">${line('<b>Previsto a fin de mes</b>', total + fixedPending, 'lo gastado + los fijos que faltan')}</div>` : ''}
-      ${Object.keys(perCat).length ? `<div style="border-top:1px solid var(--line);margin-top:12px;padding-top:6px"><div class="muted" style="font-size:12.5px;margin-top:4px">Por categoría</div>${Object.entries(perCat).sort((a, b) => b[1] - a[1]).map(([c, v]) => `<div style="display:flex;justify-content:space-between;font-size:14px;margin-top:6px"><span>${EXP_CATS[c] || c}</span><span class="money">${eur(v)}</span></div>`).join('')}</div>` : ''}
     </div>`;
+    if (Object.keys(perCat).length) html += section('din-cat', 'Por categoría', `${Object.keys(perCat).length} categorías`, `<div class="card">${Object.entries(perCat).sort((a, b) => b[1] - a[1]).map(([c, v]) => `<div style="display:flex;justify-content:space-between;font-size:14px;margin:3px 0"><span>${EXP_CATS[c] || c}</span><span class="money">${eur(v)}</span></div>`).join('')}</div>`);
     const bs = budgetStatus();
-    if (!bs.length) html += `<h2>Presupuesto del mes</h2><div class="card"><p style="margin-top:0;font-size:14px">Pon un límite al mes por categoría (súper, ocio…) y la app os avisará si os estáis pasando o vais camino de hacerlo.</p><button class="btn small" data-act="editBudgets">Definir presupuestos</button></div>`;
+    if (!bs.length) html += section('din-pres', 'Presupuesto', 'sin definir', `<div class="card"><p style="margin-top:0;font-size:14px">Pon un límite al mes por categoría (súper, ocio…) y la app os avisará si os estáis pasando o vais camino de hacerlo.</p><button class="btn small" data-act="editBudgets">Definir presupuestos</button></div>`);
     else {
       const tb = bs.reduce((a, b) => a + b.budget, 0), ts = bs.reduce((a, b) => a + b.spent, 0);
       const now = new Date(), dim = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-      html += `<h2>Presupuesto del mes</h2><div class="card"><div style="display:flex;justify-content:space-between;align-items:baseline"><b>Total</b><span class="money">${eur(ts)} <span class="muted" style="font-weight:400">/ ${eur(tb)}</span></span></div>
+      const nAl = bs.filter(b => b.state === 'over' || b.state === 'pace').length;
+      html += section('din-pres', 'Presupuesto', `${nAl ? `<span style="color:var(--warn)">⚠️ ${nAl}</span> · ` : ''}${eur(ts)} / ${eur(tb)}`, `<div class="card"><div style="display:flex;justify-content:space-between;align-items:baseline"><b>Total</b><span class="money">${eur(ts)} <span class="muted" style="font-weight:400">/ ${eur(tb)}</span></span></div>
         <div class="bar" style="height:10px"><div style="width:${Math.min(100, ts / tb * 100)}%;background:${ts > tb ? 'var(--danger)' : 'var(--ink)'}"></div></div>
         <div class="muted" style="font-size:12.5px">Día ${now.getDate()} de ${dim} · ${Math.round(now.getDate() / dim * 100)}% del mes</div>
         ${bs.map(budgetRow).join('')}
-        <button class="btn ghost small" style="margin-top:12px" data-act="editBudgets">Editar presupuestos</button></div>`;
+        <button class="btn ghost small" style="margin-top:12px" data-act="editBudgets">Editar presupuestos</button></div>`);
     }
     const rec = byMod('task').filter(t => t.area === 'finanzas' && !t.done).sort(sortDue);
     const fixedMonthly = rec.filter(isBill).filter(t => t.split !== 'pagador').reduce((s, t) => s + (+t.amount) * (MONTHLY_FACTOR[t.repeat] ?? 0), 0);
     const endMonth = (() => { const d = new Date(); return iso(new Date(d.getFullYear(), d.getMonth() + 1, 0)); })();
     const pending = rec.filter(isBill).filter(t => t.due && t.due <= endMonth && t.split !== 'pagador').reduce((s, t) => s + (+t.amount), 0);
-    html += `<h2>Gastos fijos</h2>${list(rec.map(t => taskRow(t, false)), 'Añade alquiler, comunidad, luz, seguros, suscripciones…')}
+    html += section('din-fijos', 'Gastos fijos', rec.length ? `${rec.length} · ${eur(fixedMonthly)}/mes` : 'ninguno', `${list(rec.map(t => taskRow(t, false)), 'Añade alquiler, comunidad, luz, seguros, suscripciones…')}
       ${fixedMonthly ? `<p class="muted" style="font-size:13px;margin:0 0 8px">Gastos fijos comunes: <b>${eur(fixedMonthly)}</b> al mes de media.</p>` : ''}
-      <button class="btn ghost small" data-act="new" data-kind="bill">+ Gasto fijo</button>`;
-    html += `<h2>Movimientos</h2>${list(exps.slice(0, 60).map(e => `<div class="row" data-act="edit" data-kind="expense" data-id="${e.id}"><div class="main"><div class="t">${esc(e.title)}</div><div class="s">${fmtDate(e.date)} · ${EXP_CATS[e.cat] || ''} ${ownerPill(e.paidBy)} ${e.split !== 'mitad' ? `<span class="muted">${e.split === 'pagador' ? 'personal' : 'para el otro'}</span>` : ''}</div></div><span class="money">${eur(e.amount)}</span></div>`), 'Aún no hay gastos')}`;
+      <button class="btn ghost small" data-act="new" data-kind="bill">+ Gasto fijo</button>`);
+    html += section('din-mov', 'Movimientos', exps.length ? `último: ${esc(exps[0].title)} ${eur(exps[0].amount)}` : '', limited('mov', exps.slice(0, 200).map(e => `<div class="row" data-act="edit" data-kind="expense" data-id="${e.id}"><div class="main"><div class="t">${esc(e.title)}</div><div class="s">${fmtDate(e.date)} · ${EXP_CATS[e.cat] || ''} ${ownerPill(e.paidBy)} ${e.split !== 'mitad' ? `<span class="muted">${e.split === 'pagador' ? 'personal' : 'para el otro'}</span>` : ''}</div></div><span class="money">${eur(e.amount)}</span></div>`), 8, 'Aún no hay gastos'));
     return html + fab('expense');
   },
 
@@ -467,18 +479,18 @@ const VIEWS = {
     if (p && p.left >= 0) html += `<div class="card hero"><small>Embarazo</small><div class="big">Semana ${p.weeks}+${p.days}</div><small>${p.weeks < 14 ? '1er' : p.weeks < 28 ? '2º' : '3er'} trimestre · faltan ${p.left} días (FPP ${fmtDate(S.hh.dueDate)})</small><div class="progress"><div style="width:${p.pct}%"></div></div></div>`;
     html += `<div class="btns" style="margin-bottom:6px"><button class="btn ghost small" data-act="setDue">${S.hh?.dueDate ? 'Cambiar fecha prevista de parto' : '🤰 Añadir fecha prevista de parto'}</button></div>`;
     const appts = byMod('task').filter(t => t.area === 'bebe' && !t.done).sort(sortDue);
-    html += `<h2>Citas y tareas</h2>${list(appts.map(t => taskRow(t, false)), 'Sin citas pendientes')}
+    html += `<h2>Próximas citas y tareas</h2>${limited('bebe-citas', appts.map(t => taskRow(t, false)), 4, 'Sin citas pendientes')}
       <button class="btn ghost small" data-act="new" data-kind="task" data-preset='${esc(JSON.stringify({ area: 'bebe' }))}'>+ Cita o tarea</button>`;
-    html += `<h2>Lista de preparativos</h2>`;
+    html += `<h2>Preparativos</h2>`;
     if (!checklist.length) html += `<div class="card center"><p class="muted" style="margin-top:0">Una lista con lo típico: canastilla, bolsa del hospital y trámites. Repartid cada cosa entre los dos.</p><button class="btn" data-act="seedBaby">Cargar lista sugerida</button></div>`;
     for (const g of Object.keys(BABY_SEED)) {
       const its = checklist.filter(i => i.group === g); if (!its.length) continue;
       const d = its.filter(i => i.done).length;
-      html += `<div class="muted" style="font-size:13px;margin:12px 0 6px;font-weight:600">${g} · ${d}/${its.length}</div>` + list(its.sort((a, b) => a.done - b.done).map(i => `<div class="row ${i.done ? 'done' : ''}" data-act="edit" data-kind="baby" data-id="${i.id}"><div class="check ${i.done ? 'on' : ''}" data-act="toggleBaby" data-id="${i.id}">✓</div><div class="main"><div class="t">${esc(i.title)}</div><div class="s">${ownerPill(i.owner)}</div></div></div>`));
+      html += section('bebe-g-' + slug(g), g, `${d}/${its.length}${d === its.length ? ' ✓' : ''}`, list(its.sort((a, b) => a.done - b.done).map(i => `<div class="row ${i.done ? 'done' : ''}" data-act="edit" data-kind="baby" data-id="${i.id}"><div class="check ${i.done ? 'on' : ''}" data-act="toggleBaby" data-id="${i.id}">✓</div><div class="main"><div class="t">${esc(i.title)}</div><div class="s">${ownerPill(i.owner)}</div></div></div>`)));
     }
     if (checklist.length) html += `<button class="btn ghost small" data-act="new" data-kind="baby">+ Añadir a la lista</button>`;
-    html += `<h2>Hijos</h2>${list(kids.map(k => `<div class="row" data-act="edit" data-kind="kid" data-id="${k.id}"><div class="main"><div class="t">${esc(k.title)}</div><div class="s">${k.birth ? `${ageStr(k.birth)} · nació el ${fmtDate(k.birth)}` : ''}</div></div></div>`), 'Cuando nazca, añádelo aquí')}
-      <button class="btn ghost small" data-act="new" data-kind="kid">+ Añadir hijo/a</button>`;
+    html += section('bebe-hijos', 'Hijos', kids.length ? kids.map(k => esc(k.title)).join(', ') : 'aún ninguno', `${list(kids.map(k => `<div class="row" data-act="edit" data-kind="kid" data-id="${k.id}"><div class="main"><div class="t">${esc(k.title)}</div><div class="s">${k.birth ? `${ageStr(k.birth)} · nació el ${fmtDate(k.birth)}` : ''}</div></div></div>`), 'Cuando nazca, añádelo aquí')}
+      <button class="btn ghost small" data-act="new" data-kind="kid">+ Añadir hijo/a</button>`, kids.length > 0);
     return html;
   },
 
@@ -524,7 +536,7 @@ const VIEWS = {
     html += `<h2>Avisos</h2><div class="card"><p style="margin-top:0;font-size:14px">Al abrir la app cada día te muestra una notificación con lo pendiente para hoy y los vencimientos cercanos.</p><button class="btn ghost small" data-act="notif">${('Notification' in window && Notification.permission === 'granted') ? 'Avisos activados ✓' : 'Activar avisos'}</button></div>`;
     html += `<h2>Datos</h2><div class="btns"><button class="btn ghost small" data-act="export">Descargar copia (JSON)</button><button class="btn ghost small" data-act="importFile">Importar archivo</button><input type="file" id="importInput" accept=".json,application/json" hidden>
       ${S.mode === 'demo' ? '<button class="btn danger small" data-act="resetDemo">Restablecer datos de ejemplo</button><button class="btn danger small" data-act="emptyDemo">Empezar en blanco</button>' : '<button class="btn danger small" data-act="signOut">Cerrar sesión</button>'}</div>`;
-    html += `<p class="muted center" style="font-size:12px;margin-top:20px">Versión 10 · ${new Date().getFullYear()}</p>`;
+    html += `<p class="muted center" style="font-size:12px;margin-top:20px">Versión 11 · ${new Date().getFullYear()}</p>`;
     if (S.mode === 'demo') html += `<p class="muted" style="font-size:13px;margin-top:16px">Estás en modo demo. Para usarla con tu pareja, sigue el archivo LEEME.md (configurar Firebase y publicar en GitHub Pages).</p>`;
     return html;
   }
@@ -595,6 +607,8 @@ const ACTIONS = {
   filter: el => { S.filters[el.dataset.k] = el.dataset.v; render(); },
   toggleDone: () => { S.showDone = !S.showDone; render(); },
   clearDone: async () => { if (!await ask('¿Borrar todas las tareas hechas?', 'Borrar')) return; for (const t of byMod('task').filter(t => t.done)) await S.store.remove(t.id); },
+  toggleSec: el => { const k = el.dataset.k, v = !isOpen(k, el.dataset.def === '1'); S.open[k] = v; ls.set('open', S.open); render(); },
+  toggleMore: el => { S.more ??= {}; S.more[el.dataset.k] = !S.more[el.dataset.k]; render(); },
   addHist: async el => {
     const h = find(el.dataset.id); if (!h) return;
     await S.store.add({ mod: 'shop', title: h.title, qty: '', cat: h.cat || 'otros', done: false });
