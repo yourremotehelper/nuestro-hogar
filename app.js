@@ -197,6 +197,19 @@ function budgetRow(b) {
     <div style="font-size:12.5px;color:${b.state === 'ok' ? 'var(--muted)' : BUDGET_COL[b.state]}">${budgetMsg(b)}</div></div>`;
 }
 const monthSpent = () => { const m = todayStr().slice(0, 7); return byMod('expense').filter(e => (e.date || '').startsWith(m) && e.cat !== 'liquidacion' && e.split !== 'pagador').reduce((s, e) => s + (+e.amount || 0), 0); };
+// ---------- Habituales de la compra ----------
+const slug = t => String(t).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+const histOf = title => find('hist_' + slug(title));
+async function rememberProduct(title, cat) {
+  const h = histOf(title);
+  if (h) await S.store.update(h.id, { count: (h.count || 0) + 1, last: Date.now(), cat: cat || h.cat, title });
+  else await S.store.set('hist_' + slug(title), { mod: 'shophist', title, cat: cat || 'otros', count: 1, last: Date.now() });
+}
+let histSeeded = false;
+async function seedShopHistory() { // los productos que ya estaban en la lista pasan a habituales
+  if (histSeeded) return; histSeeded = true;
+  for (const i of byMod('shop')) if (!histOf(i.title)) await S.store.set('hist_' + slug(i.title), { mod: 'shophist', title: i.title, cat: i.cat || 'otros', count: 1, last: i.createdAt || Date.now() });
+}
 const isBill = t => t.area === 'finanzas' && +t.amount > 0;
 const MONTHLY_FACTOR = { daily: 30, weekly: 52 / 12, biweekly: 26 / 12, monthly: 1, quarterly: 1 / 3, yearly: 1 / 12, none: 0 };
 // Apunta el gasto de un pago fijo. El id depende de la fecha que tocaba, así nunca se duplica aunque lo registren los dos móviles a la vez.
@@ -367,9 +380,19 @@ const VIEWS = {
     const row = i => `<div class="row ${i.done ? 'done' : ''}" data-act="toggleShop" data-id="${i.id}">
       <div class="check ${i.done ? 'on' : ''}">✓</div><div class="main"><div class="t">${esc(i.title)}${i.qty ? ` <span class="muted">· ${esc(i.qty)}</span>` : ''}</div></div>
       <button class="x" data-act="edit" data-kind="shop" data-id="${i.id}" aria-label="Editar">✎</button></div>`;
-    let html = `<form class="quick" data-form="quickShop" id="quickShopForm"><input name="title" id="quickShop" placeholder="Añadir producto…" autocomplete="off" enterkeyhint="send"><button class="btn" type="submit" aria-label="Añadir" style="padding:0 16px;font-size:22px">+</button></form>
+    let html = `<form class="quick" data-form="quickShop" id="quickShopForm"><input name="title" id="quickShop" placeholder="Añadir producto…" autocomplete="off" enterkeyhint="send" list="shopHist"><button class="btn" type="submit" aria-label="Añadir" style="padding:0 16px;font-size:22px">+</button></form>
       <select name="cat" form="quickShopForm" id="quickShopCat" style="margin:-2px 0 10px">${Object.entries(SHOP_CATS).map(([k, v]) => `<option value="${k}" ${k === S.lastShopCat ? 'selected' : ''}>Sección: ${v}</option>`).join('')}</select>`;
-    if (!open.length) html += list([], 'La lista está vacía');
+    const inList = new Set(open.map(i => slug(i.title)));
+    const hist = byMod('shophist').sort((a, b) => (b.count || 0) - (a.count || 0) || (b.last || 0) - (a.last || 0));
+    html += `<datalist id="shopHist">${hist.map(h => `<option value="${esc(h.title)}">`).join('')}</datalist>`;
+    const sugg = hist.filter(h => !inList.has(slug(h.title)));
+    if (sugg.length) {
+      const shown = S.showAllHist ? sugg : sugg.slice(0, 14);
+      html += `<div style="display:flex;justify-content:space-between;align-items:baseline;margin:4px 0 6px"><span class="muted" style="font-size:13px;font-weight:600">${S.editHist ? 'Toca para quitar de habituales' : 'Habituales · toca para añadir'}</span><button class="chip" style="padding:3px 10px;font-size:12px" data-act="toggleEditHist">${S.editHist ? 'Listo' : 'Editar'}</button></div>
+        <div class="chips" style="flex-wrap:wrap;padding-bottom:4px">${shown.map(h => `<button class="chip" data-act="${S.editHist ? 'forgetHist' : 'addHist'}" data-id="${h.id}">${S.editHist ? '✕' : '+'} ${esc(h.title)}</button>`).join('')}
+        ${sugg.length > 14 ? `<button class="chip" style="border-style:dashed" data-act="toggleAllHist">${S.showAllHist ? 'Ver menos' : `Ver todos (${sugg.length})`}</button>` : ''}</div>`;
+    }
+    if (!open.length) html += list([], hist.length ? 'La lista está vacía · toca tus habituales para añadirlos' : 'La lista está vacía');
     for (const [k, v] of Object.entries(SHOP_CATS)) {
       const g = open.filter(i => (i.cat || 'otros') === k);
       if (g.length) html += `<h2>${v}</h2>${list(g.map(row))}`;
@@ -501,7 +524,7 @@ const VIEWS = {
     html += `<h2>Avisos</h2><div class="card"><p style="margin-top:0;font-size:14px">Al abrir la app cada día te muestra una notificación con lo pendiente para hoy y los vencimientos cercanos.</p><button class="btn ghost small" data-act="notif">${('Notification' in window && Notification.permission === 'granted') ? 'Avisos activados ✓' : 'Activar avisos'}</button></div>`;
     html += `<h2>Datos</h2><div class="btns"><button class="btn ghost small" data-act="export">Descargar copia (JSON)</button><button class="btn ghost small" data-act="importFile">Importar archivo</button><input type="file" id="importInput" accept=".json,application/json" hidden>
       ${S.mode === 'demo' ? '<button class="btn danger small" data-act="resetDemo">Restablecer datos de ejemplo</button><button class="btn danger small" data-act="emptyDemo">Empezar en blanco</button>' : '<button class="btn danger small" data-act="signOut">Cerrar sesión</button>'}</div>`;
-    html += `<p class="muted center" style="font-size:12px;margin-top:20px">Versión 9 · ${new Date().getFullYear()}</p>`;
+    html += `<p class="muted center" style="font-size:12px;margin-top:20px">Versión 10 · ${new Date().getFullYear()}</p>`;
     if (S.mode === 'demo') html += `<p class="muted" style="font-size:13px;margin-top:16px">Estás en modo demo. Para usarla con tu pareja, sigue el archivo LEEME.md (configurar Firebase y publicar en GitHub Pages).</p>`;
     return html;
   }
@@ -572,6 +595,14 @@ const ACTIONS = {
   filter: el => { S.filters[el.dataset.k] = el.dataset.v; render(); },
   toggleDone: () => { S.showDone = !S.showDone; render(); },
   clearDone: async () => { if (!await ask('¿Borrar todas las tareas hechas?', 'Borrar')) return; for (const t of byMod('task').filter(t => t.done)) await S.store.remove(t.id); },
+  addHist: async el => {
+    const h = find(el.dataset.id); if (!h) return;
+    await S.store.add({ mod: 'shop', title: h.title, qty: '', cat: h.cat || 'otros', done: false });
+    rememberProduct(h.title, h.cat);
+  },
+  forgetHist: async el => { await S.store.remove(el.dataset.id); },
+  toggleEditHist: () => { S.editHist = !S.editHist; render(); },
+  toggleAllHist: () => { S.showAllHist = !S.showAllHist; render(); },
   finishShop: () => {
     const inCart = byMod('shop').filter(i => i.done);
     const last = ls.get('lastShop', { title: 'Compra súper', cat: 'super' });
@@ -673,7 +704,9 @@ document.addEventListener('submit', async e => {
   if (!title) { inp?.focus(); return; }
   S.lastShopCat = $('#quickShopCat')?.value || 'otros'; S.refocus = '#quickShop';
   inp.value = '';
-  try { await S.store.add({ mod: 'shop', title, qty: '', cat: S.lastShopCat, done: false }); }
+  const known = histOf(title);
+  if (known && !$('#quickShopCat')?.dataset.touched) S.lastShopCat = known.cat || S.lastShopCat;
+  try { await S.store.add({ mod: 'shop', title, qty: '', cat: S.lastShopCat, done: false }); rememberProduct(title, S.lastShopCat); }
   catch (err) { console.error(err); inp.value = title; toast('No se pudo añadir: ' + (err.code || err.message)); }
 });
 document.addEventListener('keydown', e => {
@@ -696,7 +729,13 @@ async function importData(file) {
   if (data.dueDate) await S.store.updateHousehold({ dueDate: data.dueDate });
   toast(`Importado ✓ (${nuevos.length})`);
 }
+document.addEventListener('input', e => {
+  if (e.target.id !== 'quickShop') return;
+  const h = histOf(e.target.value.trim()), sel = $('#quickShopCat');
+  if (h && sel && !sel.dataset.touched) sel.value = h.cat || 'otros';
+});
 document.addEventListener('change', async e => {
+  if (e.target.id === 'quickShopCat') e.target.dataset.touched = '1';
   if (e.target.id === 'importInput' && e.target.files[0]) { await importData(e.target.files[0]); e.target.value = ''; return; }
   if (e.target.id === 'trackDebt') { await S.store.updateHousehold({ trackDebt: e.target.checked }); toast(e.target.checked ? 'Cuentas entre vosotros activadas' : 'Ya no se muestra quién debe a quién'); }
 });
@@ -716,7 +755,7 @@ function render() {
   $('#view').innerHTML = VIEWS[S.view]();
   if (S.refocus) { $(S.refocus)?.focus(); S.refocus = null; }
 }
-function onData(hh, items) { S.hh = hh; S.items = items; render(); processBills().catch(e => console.error(e)); }
+function onData(hh, items) { S.hh = hh; S.items = items; render(); processBills().catch(e => console.error(e)); seedShopHistory().catch(e => console.error(e)); }
 
 function dailyNotify() {
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
