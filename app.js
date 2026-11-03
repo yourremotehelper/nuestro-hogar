@@ -390,8 +390,18 @@ const VIEWS = {
     else if (bal) html += `<div class="card center">${bal.n === 0 ? '<div class="big" style="font-size:20px;font-weight:700">Estáis en paz 🤝</div>' :
       `<div class="muted">${esc(nameOf(bal.n > 0 ? bal.b : bal.a))} le debe a ${esc(nameOf(bal.n > 0 ? bal.a : bal.b))}</div><div style="font-size:28px;font-weight:700;margin:4px 0 10px">${eur(Math.abs(bal.n))}</div><button class="btn small" data-act="settle">Saldar cuentas</button>`}</div>`;
     else html += `<div class="banner">Cuando tu pareja se una al hogar, aquí veréis quién le debe a quién.</div>`;
-    html += `<h2>Gasto común de este mes</h2><div class="card"><div style="font-size:24px;font-weight:700">${eur(total)}</div>
-      ${Object.entries(perCat).sort((a, b) => b[1] - a[1]).map(([c, v]) => `<div style="display:flex;justify-content:space-between;font-size:14px;margin-top:6px"><span>${EXP_CATS[c] || c}</span><span class="money">${eur(v)}</span></div>`).join('')}</div>`;
+    const endM = (() => { const d = new Date(); return iso(new Date(d.getFullYear(), d.getMonth() + 1, 0)); })();
+    const fixedSpent = month.filter(e => e.recurring).reduce((s, e) => s + (+e.amount || 0), 0);
+    const varSpent = total - fixedSpent;
+    const fixedPending = byMod('task').filter(t => isBill(t) && !t.done && t.due && t.due <= endM && t.split !== 'pagador').reduce((s, t) => s + (+t.amount), 0);
+    const line = (label, val, sub = '') => `<div style="display:flex;justify-content:space-between;align-items:baseline;font-size:15px;margin-top:8px"><span>${label}${sub ? `<br><small class="muted">${sub}</small>` : ''}</span><span class="money">${eur(val)}</span></div>`;
+    html += `<h2>Gastos de este mes</h2><div class="card">
+      <div class="muted" style="font-size:13px">Gastado hasta hoy</div><div style="font-size:26px;font-weight:700">${eur(total)}</div>
+      ${line('🔁 Fijos', fixedSpent, fixedPending ? `+ ${eur(fixedPending)} por pasar este mes` : '')}
+      ${line('🛒 Variables', varSpent, 'compras, ocio y demás gastos apuntados a mano')}
+      ${fixedPending ? `<div style="border-top:1px solid var(--line);margin-top:12px;padding-top:10px">${line('<b>Previsto a fin de mes</b>', total + fixedPending, 'lo gastado + los fijos que faltan')}</div>` : ''}
+      ${Object.keys(perCat).length ? `<div style="border-top:1px solid var(--line);margin-top:12px;padding-top:6px"><div class="muted" style="font-size:12.5px;margin-top:4px">Por categoría</div>${Object.entries(perCat).sort((a, b) => b[1] - a[1]).map(([c, v]) => `<div style="display:flex;justify-content:space-between;font-size:14px;margin-top:6px"><span>${EXP_CATS[c] || c}</span><span class="money">${eur(v)}</span></div>`).join('')}</div>` : ''}
+    </div>`;
     const bs = budgetStatus();
     if (!bs.length) html += `<h2>Presupuesto del mes</h2><div class="card"><p style="margin-top:0;font-size:14px">Pon un límite al mes por categoría (súper, ocio…) y la app os avisará si os estáis pasando o vais camino de hacerlo.</p><button class="btn small" data-act="editBudgets">Definir presupuestos</button></div>`;
     else {
@@ -407,7 +417,6 @@ const VIEWS = {
     const fixedMonthly = rec.filter(isBill).filter(t => t.split !== 'pagador').reduce((s, t) => s + (+t.amount) * (MONTHLY_FACTOR[t.repeat] ?? 0), 0);
     const endMonth = (() => { const d = new Date(); return iso(new Date(d.getFullYear(), d.getMonth() + 1, 0)); })();
     const pending = rec.filter(isBill).filter(t => t.due && t.due <= endMonth && t.split !== 'pagador').reduce((s, t) => s + (+t.amount), 0);
-    if (pending) html += `<p class="muted" style="font-size:13px;margin:-4px 0 0">Quedan <b>${eur(pending)}</b> de gastos fijos por pasar este mes.</p>`;
     html += `<h2>Gastos fijos</h2>${list(rec.map(t => taskRow(t, false)), 'Añade alquiler, comunidad, luz, seguros, suscripciones…')}
       ${fixedMonthly ? `<p class="muted" style="font-size:13px;margin:0 0 8px">Gastos fijos comunes: <b>${eur(fixedMonthly)}</b> al mes de media.</p>` : ''}
       <button class="btn ghost small" data-act="new" data-kind="bill">+ Gasto fijo</button>`;
@@ -492,7 +501,7 @@ const VIEWS = {
     html += `<h2>Avisos</h2><div class="card"><p style="margin-top:0;font-size:14px">Al abrir la app cada día te muestra una notificación con lo pendiente para hoy y los vencimientos cercanos.</p><button class="btn ghost small" data-act="notif">${('Notification' in window && Notification.permission === 'granted') ? 'Avisos activados ✓' : 'Activar avisos'}</button></div>`;
     html += `<h2>Datos</h2><div class="btns"><button class="btn ghost small" data-act="export">Descargar copia (JSON)</button><button class="btn ghost small" data-act="importFile">Importar archivo</button><input type="file" id="importInput" accept=".json,application/json" hidden>
       ${S.mode === 'demo' ? '<button class="btn danger small" data-act="resetDemo">Restablecer datos de ejemplo</button><button class="btn danger small" data-act="emptyDemo">Empezar en blanco</button>' : '<button class="btn danger small" data-act="signOut">Cerrar sesión</button>'}</div>`;
-    html += `<p class="muted center" style="font-size:12px;margin-top:20px">Versión 7 · ${new Date().getFullYear()}</p>`;
+    html += `<p class="muted center" style="font-size:12px;margin-top:20px">Versión 8 · ${new Date().getFullYear()}</p>`;
     if (S.mode === 'demo') html += `<p class="muted" style="font-size:13px;margin-top:16px">Estás en modo demo. Para usarla con tu pareja, sigue el archivo LEEME.md (configurar Firebase y publicar en GitHub Pages).</p>`;
     return html;
   }
