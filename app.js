@@ -374,7 +374,7 @@ const VIEWS = {
       const g = open.filter(i => (i.cat || 'otros') === k);
       if (g.length) html += `<h2>${v}</h2>${list(g.map(row))}`;
     }
-    if (done.length) html += `<h2>En el carro (${done.length})</h2>${list(done.map(row))}<button class="btn ghost block" data-act="clearShop">Quitar comprados</button>`;
+    if (done.length) html += `<h2>En el carro (${done.length})</h2>${list(done.map(row))}<button class="btn block" data-act="finishShop">🧾 Terminar compra</button><button class="btn ghost block" style="margin-top:8px" data-act="clearShop">Quitar del carro sin apuntar gasto</button>`;
     return html;
   },
 
@@ -501,7 +501,7 @@ const VIEWS = {
     html += `<h2>Avisos</h2><div class="card"><p style="margin-top:0;font-size:14px">Al abrir la app cada día te muestra una notificación con lo pendiente para hoy y los vencimientos cercanos.</p><button class="btn ghost small" data-act="notif">${('Notification' in window && Notification.permission === 'granted') ? 'Avisos activados ✓' : 'Activar avisos'}</button></div>`;
     html += `<h2>Datos</h2><div class="btns"><button class="btn ghost small" data-act="export">Descargar copia (JSON)</button><button class="btn ghost small" data-act="importFile">Importar archivo</button><input type="file" id="importInput" accept=".json,application/json" hidden>
       ${S.mode === 'demo' ? '<button class="btn danger small" data-act="resetDemo">Restablecer datos de ejemplo</button><button class="btn danger small" data-act="emptyDemo">Empezar en blanco</button>' : '<button class="btn danger small" data-act="signOut">Cerrar sesión</button>'}</div>`;
-    html += `<p class="muted center" style="font-size:12px;margin-top:20px">Versión 8 · ${new Date().getFullYear()}</p>`;
+    html += `<p class="muted center" style="font-size:12px;margin-top:20px">Versión 9 · ${new Date().getFullYear()}</p>`;
     if (S.mode === 'demo') html += `<p class="muted" style="font-size:13px;margin-top:16px">Estás en modo demo. Para usarla con tu pareja, sigue el archivo LEEME.md (configurar Firebase y publicar en GitHub Pages).</p>`;
     return html;
   }
@@ -572,6 +572,33 @@ const ACTIONS = {
   filter: el => { S.filters[el.dataset.k] = el.dataset.v; render(); },
   toggleDone: () => { S.showDone = !S.showDone; render(); },
   clearDone: async () => { if (!await ask('¿Borrar todas las tareas hechas?', 'Borrar')) return; for (const t of byMod('task').filter(t => t.done)) await S.store.remove(t.id); },
+  finishShop: () => {
+    const inCart = byMod('shop').filter(i => i.done);
+    const last = ls.get('lastShop', { title: 'Compra súper', cat: 'super' });
+    const opts = (o, v) => Object.entries(o).map(([k, l]) => `<option value="${esc(k)}" ${k === v ? 'selected' : ''}>${esc(l)}</option>`).join('');
+    const form = $('#sheetForm');
+    form.innerHTML = `<h3>Terminar compra</h3><p class="muted" style="font-size:13px;margin:4px 0 0">${inCart.length} productos en el carro. Se apunta el ticket en Dinero y se vacía el carro.</p>
+      <label>Total del ticket (€)</label><input name="amount" type="number" step="0.01" inputmode="decimal" required>
+      <label>Tienda</label><input name="title" value="${esc(last.title)}" required>
+      <label>Categoría</label><select name="cat">${opts(Object.fromEntries(Object.entries(EXP_CATS).filter(([k]) => k !== 'liquidacion')), last.cat)}</select>
+      <label>Pagado por</label><select name="paidBy">${opts(Object.fromEntries(members().map(m => [m, nameOf(m)])), S.me)}</select>
+      ${debtOn() ? `<label>¿De quién es el gasto?</label><select name="split">${opts(SPLITS, 'mitad')}</select>` : ''}
+      <div class="sheet-actions"><button class="btn ghost" value="cancel" formnovalidate>Cancelar</button><button class="btn" value="save">Apuntar y vaciar</button></div>`;
+    form.onsubmit = async e => {
+      e.preventDefault();
+      if (e.submitter?.value !== 'save') return $('#sheet').close();
+      const fd = Object.fromEntries(new FormData(form));
+      const amount = parseFloat(String(fd.amount).replace(',', '.'));
+      if (!(amount > 0)) return toast('Pon el total del ticket');
+      $('#sheet').close();
+      await S.store.add({ mod: 'expense', title: fd.title.trim() || 'Compra', amount, paidBy: fd.paidBy || S.me, split: fd.split || 'mitad', cat: fd.cat || 'super', date: todayStr(), items: inCart.length });
+      for (const i of inCart) await S.store.remove(i.id);
+      ls.set('lastShop', { title: fd.title.trim(), cat: fd.cat });
+      toast(`Compra apuntada ✓ · ${eur(amount)}`);
+    };
+    $('#sheet').showModal();
+    setTimeout(() => form.amount.focus(), 50);
+  },
   clearShop: async () => { for (const i of byMod('shop').filter(i => i.done)) await S.store.remove(i.id); toast('Lista limpia'); },
   settle: async () => {
     const b = balance(); if (!b || !b.n) return;
